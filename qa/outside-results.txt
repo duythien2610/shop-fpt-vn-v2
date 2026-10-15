@@ -1,0 +1,5 @@
+PASS 1440px: outside configuration, one-page checkout, preservation, totals, address confirmation, method repricing, retry/pending/success
+PASS 768px: outside configuration, one-page checkout, preservation, totals, address confirmation, method repricing, retry/pending/success
+PASS 375px: outside configuration, one-page checkout, preservation, totals, address confirmation, method repricing, retry/pending/success
+PASS address check failure retains checkout and blocks transaction
+PASS no runtime errors

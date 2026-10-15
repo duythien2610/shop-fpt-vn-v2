@@ -1,0 +1,300 @@
+/* Deterministic UI-only commerce simulation. No requests, SDKs or persistence. */
+(() => {
+  const A=window.Storefront,D=window.demoCommerce,{esc,money,icon}=A;
+  const flow=document.getElementById('purchase'),voucherDialog=document.getElementById('voucher-dialog');
+  const standard=document.body.dataset.salesFlow==='standard';
+  const outside=document.body.dataset.outside==='true';
+  if(outside)flow.classList.add('outside-checkout');
+  const checkoutOnly=document.body.dataset.checkoutOnly==='true';
+  const clean=document.body.dataset.clean==='true';
+  const layout=()=>checkoutOnly||clean?(document.body.dataset.checkoutLayout||'three'):'three';
+  const initial=()=>({pricing:false,priceEpoch:0,policyMessage:'',voucherManual:false,planId:null,values:{},step:'contact',addressEditing:false,period:window.landingState.period,extras:[],method:'vnpay',voucher:null,voucherCode:'',voucherMessage:'',voucherError:false,status:'dirty',quote:null,lastAcceptedMonthly:null,needsPriceConfirm:false,scenario:'normal',errors:{},addressMessage:'',epoch:0,transaction:null,order:null,lead:null,extrasOpen:false,voucherOpen:false});
+  const state=initial();
+  let timer,chosenVoucher='',outsideSubmitting=false;
+  const plan=()=>window.catalog.find(p=>p.id===state.planId);
+  const period=()=>D.periods.find(p=>p.id===state.period)||D.periods[0];
+  const signature=()=>JSON.stringify([state.planId,...['province','ward','houseType','building','address','block'].map(k=>String(state.values[k]||'').trim()),state.scenario]);
+  const validQuote=()=>state.status==='verified'&&state.quote?.signature===signature();
+  const addressText=()=>[state.values.houseType==='apartment'&&state.values.building,state.values.block,state.values.address,state.values.ward,state.values.province].filter(Boolean).join(', ');
+  function totals(){
+    const monthly=validQuote()?state.quote.monthly:A.price(plan(),state.values.province),p=period();
+    const service=p.id==='post'?0:monthly*p.months;
+    const extras=state.extras.map(id=>D.extras.find(x=>x.id===id)).filter(Boolean).reduce((sum,x)=>sum+x.price,0);
+    const subtotal=service+p.fee+extras;
+    const discount=validQuote()&&state.voucher&&!voucherReason(state.voucher,{subtotal,monthly})?DemoPolicy.voucherAmount(state.voucher,{subtotal,fee:p.fee}):0;
+    return {monthly,service,fee:p.fee,extras,subtotal,discount,total:Math.max(0,subtotal-discount)};
+  }
+  function voucherReason(v,amounts){
+    if(!v)return 'Mã ưu đãi không tồn tại.';
+    if(v.expired)return 'Ưu đãi đã hết hạn.';if(v.testOnly&&state.scenario!=='zero')return 'Chỉ dùng trong kịch bản đơn 0đ.';if(v.methods&&!v.methods.includes(state.method))return 'Không áp dụng với phương thức thanh toán đã chọn.';
+    if(!validQuote())return 'Cần kiểm tra địa chỉ trước khi chọn ưu đãi.';
+    if(v.installation&&period().fee===0)return 'Ưu đãi chỉ áp dụng khi có phí lắp đặt.';
+    if(period().months<(v.minMonths||1))return `Cần chọn trả trước từ ${v.minMonths} tháng.`;
+    const subtotal=amounts?.subtotal ?? ((period().id==='post'?0:state.quote.monthly*period().months)+period().fee+state.extras.map(id=>D.extras.find(x=>x.id===id)).filter(Boolean).reduce((sum,x)=>sum+x.price,0));
+    if(subtotal<(v.minTotal||0))return `Tổng trước giảm cần từ ${money(v.minTotal)}.`;
+    return '';
+  }
+  function revalidateVoucher(){
+    if(state.voucher){const reason=voucherReason(state.voucher);if(reason){state.voucher=null;state.voucherMessage='Ưu đãi đã được gỡ: '+reason;state.voucherError=true;}}
+  }
+  function refreshPolicy(){
+ const removed=state.extras.filter(id=>!DemoPolicy.extras(plan(),state.period).some(x=>x.id===id));state.extras=state.extras.filter(id=>!removed.includes(id));
+ const methods=DemoPolicy.methods(plan(),state.period);if(!methods.some(m=>m.id===state.method))state.method=methods[0].id;
+ const lost=state.voucher&&voucherReason(state.voucher);if(lost){state.voucher=null;state.voucherManual=false;state.policyMessage='Ưu đãi trước không còn hợp lệ. Đã kiểm tra lại theo lựa chọn mới.';}
+ if(removed.length)state.policyMessage='Đã gỡ thiết bị không còn áp dụng cho gói hoặc kỳ cước mới.';
+ if(validQuote()&&!state.voucherManual){const t=totals(),eligible=D.vouchers.filter(v=>!voucherReason(v));state.voucher=state.scenario==='zero'?D.vouchers.find(v=>v.code==='DON0'):DemoPolicy.autoVoucher(eligible,t);state.voucherMessage=state.voucher?'Đã áp dụng '+state.voucher.code+' theo chính sách mẫu.':'';state.voucherError=false;}
+}
+async function recalculate(change){
+ const before={period:state.period,extras:[...state.extras],method:state.method,voucher:state.voucher,voucherManual:state.voucherManual};change();
+ const removed=state.extras.some(id=>!DemoPolicy.extras(plan(),state.period).some(x=>x.id===id));const invalidVoucher=state.voucher&&voucherReason(state.voucher);
+ if((removed||invalidVoucher)&&!window.confirm('Thay đổi này có thể gỡ thiết bị hoặc ưu đãi không còn hợp lệ. Tiếp tục?')){Object.assign(state,before);render();return;}
+ const token=++state.priceEpoch;state.pricing=true;state.policyMessage='';render();await new Promise(r=>setTimeout(r,350));if(token!==state.priceEpoch)return;refreshPolicy();state.pricing=false;if(standard&&state.order)createOrder();window.landingState.period=state.period;render();
+}
+function input(name,label,{type='text',optional=false,placeholder='',autocomplete='',readonly=false,options=null}={}){
+    const v=state.values[name]??'',err=state.errors[name]||'',id='buy-'+name;
+    const attr=`id="${id}" name="${name}" ${autocomplete?`autocomplete="${autocomplete}"`:''} aria-describedby="${id}-error" ${err?'aria-invalid="true"':''} ${readonly?'disabled':''} ${optional?'':'required'}`;
+    const control=options?`<select ${attr}>${options.map(o=>`<option value="${esc(typeof o==='string'?o:o.value)}" ${v===(typeof o==='string'?o:o.value)?'selected':''}>${esc(typeof o==='string'?o:o.label)}</option>`).join('')}</select>`:type==='textarea'?`<textarea ${attr} rows="2" placeholder="${esc(placeholder)}">${esc(v)}</textarea>`:`<input ${attr} type="${type}" ${type==='tel'?'inputmode="tel"':''} value="${esc(v)}" placeholder="${esc(placeholder)}">`;
+    return `<div class="field"><label for="${id}">${label}${optional?' <span class="optional">(không bắt buộc)</span>':' <b>*</b>'}</label>${control}<p class="field-error" id="${id}-error">${esc(err)}</p></div>`;
+  }
+  function addressPanel(){
+    const v=state.values,editing=state.addressEditing,wards=D.regions[v.province]?.wards||[];
+    return `<section class="purchase-panel"><p class="eyebrow">${clean?'':checkoutOnly?'02 · ':'03 · '}ĐỊA CHỈ LẮP ĐẶT</p><h2>Địa chỉ lắp đặt</h2><div class="address-context"><span>${esc(v.province)} · ${esc(v.ward)} · ${v.houseType==='apartment'?'Chung cư':'Nhà riêng'}</span><button type="button" class="text-button" data-action="edit-address" aria-expanded="${editing}">${editing?'Thu gọn':'Đổi'}</button></div>${editing?`<div class="field-grid">${input('province','Tỉnh / Thành phố',{options:Object.keys(D.regions)})}${input('ward','Phường / Xã',{options:wards})}</div><fieldset class="house-types"><legend>Loại địa điểm</legend>${[['house','Nhà riêng'],['apartment','Chung cư']].map(([id,label])=>`<label><input type="radio" name="houseType" value="${id}" ${v.houseType===id?'checked':''}>${label}</label>`).join('')}</fieldset>`:''}<p class="panel-description">Khu vực đã điền sẵn. Chỉ cần bổ sung địa chỉ cụ thể của bạn.</p>${v.houseType==='apartment'?`${editing||!v.building?input('building','Chung cư',{options:[{value:'',label:'Chọn chung cư'},...D.buildings]}):`<p class="building-context">${esc(v.building)}</p>`}<div class="field-grid">${input('block','Tòa / Tầng',{optional:true,placeholder:'Ví dụ: Tòa A, tầng 12'})}${input('address','Số căn hộ',{placeholder:'Ví dụ: A1205',autocomplete:'address-line1'})}</div>`:input('address','Số nhà, tên đường',{placeholder:'Ví dụ: 123 Đường mẫu',autocomplete:'street-address'})}${outside?'<details class="outside-note"><summary>Thêm ghi chú lắp đặt (không bắt buộc)</summary>':''}${input('note','Ghi chú',{type:'textarea',optional:true,placeholder:'Hướng dẫn tìm nhà hoặc lịch lắp đặt mong muốn'})}${outside?'</details>':''}<div id="address-feedback" aria-live="polite">${addressFeedback()}</div><button type="button" class="button outline check-address" data-action="check-address" ${state.status==='checking'?'disabled aria-busy="true"':''}>${state.status==='checking'?'Đang kiểm tra…':'Kiểm tra lại địa chỉ & giá'}</button></section>`;
+  }
+  function addressFeedback(){
+    if(state.status==='checking')return '<div class="status-message checking"><span class="spinner" aria-hidden="true"></span><span>Đang kiểm tra gói và giá theo địa chỉ…</span></div>';
+    if(state.status==='error')return `<div class="status-message error"><strong>Chưa kiểm tra được địa chỉ</strong><p>${esc(state.addressMessage)}</p></div>`;
+    if(state.status==='unavailable'||state.status==='none'){
+      const alternatives=state.quote?.alternatives||[];
+      return `<div class="status-message warning"><strong>${alternatives.length?'Gói đã chọn không áp dụng tại địa chỉ này':'Chưa có gói phù hợp tại địa chỉ này'}</strong><p>${alternatives.length?'Chọn một gói khác bên dưới. Thông tin bạn đã nhập vẫn được giữ.':'Bạn có thể sửa địa chỉ hoặc liên hệ sales để được hỗ trợ.'}</p></div>${alternatives.length?`<div class="replacement-plans">${alternatives.map(p=>`<button type="button" class="replacement-plan" data-replace="${p.id}"><span><strong>${esc(p.name)}</strong><small>${esc(p.down)} · ${esc(p.up)}</small></span><span>${money(A.price(p,state.values.province))} ${icon('arrow')}</span></button>`).join('')}</div>`:'<button type="button" class="text-button contact-trigger">Liên hệ người hỗ trợ</button>'}`;
+    }
+    if(validQuote())return `<div class="status-message ${state.needsPriceConfirm?'warning':'success'}"><strong>${state.needsPriceConfirm?'Giá đã thay đổi theo địa chỉ':'Gói có thể đăng ký tại địa chỉ này · mẫu'}</strong>${state.needsPriceConfirm?`<p>Giá tại ${esc(state.values.province)}: <s>${money(state.lastAcceptedMonthly)}</s> → <strong>${money(state.quote.monthly)}</strong>. Phí và ưu đãi bên cạnh đã được cập nhật.</p><div class="price-actions"><button type="button" class="button primary" data-action="confirm-price">Tiếp tục với giá này</button><button type="button" class="button outline" data-action="choose-plan">Chọn gói khác</button><button type="button" class="text-button contact-trigger">Nhờ sales hỗ trợ</button></div>`:'<p>Kiểm tra hoàn tất trong bản mẫu. Có thể tiếp tục đăng ký.</p>'}</div>`;
+    return '<div class="status-message neutral"><strong>Kiểm tra trước khi thanh toán</strong><p>Gói, giá và ưu đãi sẽ được xác nhận theo địa chỉ bạn nhập.</p></div>';
+  }
+  function contactPanel(){
+    return `<section class="purchase-panel"><p class="eyebrow">${clean?'':checkoutOnly?'01 · ':'02 · '}THÔNG TIN LIÊN HỆ</p><h2>Thông tin liên hệ</h2><p class="panel-description">${document.body.dataset.concept==='3'?'Để người hỗ trợ của bạn xác nhận lịch lắp đặt.':'Dùng để xác nhận đăng ký và lịch lắp đặt.'}</p><div class="contact-fields">${input('name','Họ và tên',{autocomplete:'name'})}${input('phone','Số điện thoại',{type:'tel',autocomplete:'tel',placeholder:'10 chữ số, bắt đầu bằng 0'})}</div><label class="consent"><input id="buy-consent" type="checkbox" name="consent" ${state.values.consent?'checked':''} aria-describedby="buy-consent-error" ${state.errors.consent?'aria-invalid="true"':''}><span>Tôi đồng ý để FPT liên hệ về đăng ký và xử lý dữ liệu theo <a href="https://fpt.vn/ho-tro/chinh-sach-quy-trinh/5107/5076/286" target="_blank" rel="noopener">chính sách dữ liệu cá nhân</a>.</span></label><p class="field-error" id="buy-consent-error">${esc(state.errors.consent||'')}</p></section>`;
+  }
+  function paymentAction(mobile=false){
+    const checked=validQuote(),t=totals(),busy=state.pricing||state.status==='checking';
+    const enabled=(checked||outside)&&!state.needsPriceConfirm&&!busy;
+    const label=busy?'Đang kiểm tra…':outside&&!checked?'Kiểm tra & thanh toán':checked?(t.total===0?'Xác nhận đăng ký':'Thanh toán '+money(t.total)):'Kiểm tra lại địa chỉ';
+    const compact=busy?'Đang cập nhật…':outside&&!checked?'Kiểm tra':t.total===0&&checked?'Xác nhận':'Thanh toán';
+    return `<button type="button" class="button primary ${mobile?'mobile-pay-button':'pay-button'}" ${mobile?'data-mobile-pay':'data-action="pay"'} ${enabled?'':'disabled'} aria-label="${esc(label)}" ${busy?'aria-busy="true"':''}>${mobile?compact:label}</button>`;
+  }
+  function mobilePaymentBar(){
+    if(state.step!=='payment')return '';const checked=validQuote(),t=totals();
+    return `<div class="checkout-mobile-action" role="region" aria-label="Tổng tiền và thanh toán"><div class="checkout-mobile-total"><span>${state.pricing||state.status==='checking'?'Đang cập nhật':checked?'Cần trả':'Dự kiến'}</span><strong>${checked||outside?money(t.total):'Chờ kiểm tra'}</strong></div>${paymentAction(true)}</div>`;
+  }
+  function summary(){
+    const p=plan(),t=totals(),checked=validQuote(),paymentStage=state.step==='payment',eligible=D.vouchers.filter(v=>!voucherReason(v)).length;
+    if(!paymentStage)return `<aside class="purchase-summary purchase-summary-early"><p class="eyebrow">GÓI BẠN ĐÃ CHỌN</p><h2>${esc(p.name)}</h2><p class="summary-description">${esc(p.description)}</p><div class="monthly-price"><strong>${money(t.monthly)}</strong><span>/ tháng</span></div><div class="summary-speeds"><span>↓ ${esc(p.down)}</span><span>↑ ${esc(p.up)}</span></div><ul class="features">${p.features.map(f=>`<li>${icon('check')}${esc(f)}</li>`).join('')}</ul><div class="summary-sales">${A.avatar()}<div><small>Người hỗ trợ của bạn</small><strong>${esc(A.offer().sales.name)}</strong><span>${esc(A.offer().sales.id)}</span></div></div><p class="early-due"><strong>Cần trả hôm nay</strong><span>${standard?'Chọn kỳ cước và xem tổng tiền sau khi xác nhận địa chỉ.':clean?period().label+' · ban đầu dự kiến '+money(t.total)+'. Xác nhận sau khi kiểm tra địa chỉ.':'Xác định sau khi chọn kỳ cước ở bước '+(checkoutOnly?(layout()==='two'?'2':'3'):'4')+'.'}</span></p><p class="demo-note">Giá minh họa đã áp khu vực. Không thu tiền thật.</p></aside>`;
+
+    return `<aside class="purchase-summary"><p class="eyebrow">GÓI BẠN ĐÃ CHỌN</p><h2>${esc(p.name)}</h2><p class="summary-description">${esc(p.description)}</p><div class="monthly-price"><strong>${money(t.monthly)}</strong><span>/ tháng</span></div><div class="summary-speeds"><span>↓ ${esc(p.down)}</span><span>↑ ${esc(p.up)}</span></div><ul class="features">${p.features.map(f=>`<li>${icon('check')}${esc(f)}</li>`).join('')}</ul><div class="summary-divider"></div><dl class="cost-breakdown"><div><dt>Cước hàng tháng</dt><dd>${money(t.monthly)}</dd></div></dl><h3>Thông tin thanh toán</h3><dl class="cost-breakdown"><div><dt>${period().label}</dt><dd>${(checked||outside)?money(t.service):'Chờ kiểm tra'}</dd></div><div><dt>Modem Wi-Fi 6 đi kèm</dt><dd>0đ</dd></div><div><dt>Phí lắp đặt</dt><dd>${(checked||outside)?money(t.fee):'Chờ kiểm tra'}</dd></div>${state.extras.map(id=>D.extras.find(x=>x.id===id)).filter(Boolean).map(x=>`<div><dt>${esc(x.name)}</dt><dd>${(checked||outside)?money(x.price):'Chờ kiểm tra'}</dd></div>`).join('')}</dl><p class="fee-note">${period().id==='post'?'Phí lắp đặt áp dụng cho đăng ký mới trong dữ liệu mẫu. Cước tháng chưa thu hôm nay.':'Miễn phí lắp đặt theo kỳ trả trước trong dữ liệu mẫu.'}</p>${paymentStage?`<details class="voucher-disclosure" ${state.voucherOpen?'open':''}><summary>Mã ưu đãi ${state.voucher?'· Đã áp dụng':'(không bắt buộc)'}</summary><div class="voucher-entry"><div class="voucher-input-wrap"><input id="voucher-code" aria-label="Nhập mã ưu đãi" value="${esc(state.voucherCode)}" placeholder="Nhập mã ưu đãi" autocomplete="off"><button class="text-button" type="button" data-action="open-vouchers" ${checked?'':'disabled'}>Chọn ưu đãi ${icon('ticket')}<span class="voucher-count">${eligible}</span></button></div><button class="button outline" type="button" id="apply-voucher" data-action="apply-code" ${checked&&state.voucherCode.trim()?'':'disabled'}>Áp dụng</button></div><p id="voucher-status" class="voucher-status ${state.voucherError?'error':'success'}" role="status">${esc(state.voucherMessage)}</p></details>`:''}${state.voucher?`<div class="applied-voucher"><span><strong>${esc(state.voucher.code)}</strong><button type="button" class="text-button" data-action="remove-voucher">Bỏ ưu đãi</button></span><strong>${checked?'-'+money(t.discount):'Chờ kiểm tra'}</strong></div>`:''}<div class="summary-sales">${A.avatar()}<div><small>Bạn đang đăng ký với sự hỗ trợ của</small><strong>${esc(A.offer().sales.name)}</strong><span>${esc(A.offer().sales.id)}</span></div></div><div class="due-today"><span>${outside&&!checked?'Ban đầu dự kiến':'Cần trả hôm nay'}</span><strong id="due-total">${(checked||outside)?money(t.total):'Kiểm tra địa chỉ để xác định'}</strong></div><p class="next-bill">${period().id==='post'?`Cước ${money(t.monthly)}/tháng được thanh toán sau theo kỳ.`:`Kỳ tiếp theo sau ${period().months} tháng · cước ${money(t.monthly)}/tháng.`}</p>${paymentStage?`${paymentAction()}`:'<p class="summary-check-note">Tổng tiền chỉ được xác nhận sau khi kiểm tra địa chỉ.</p>'}<p class="demo-note">Giá, phí và ưu đãi minh họa. Không thu tiền thật.</p></aside>`;
+  }
+  function info(){
+    const contact=state.step==='contact',combined=layout()==='two';
+    return `<form id="purchase-form" novalidate><div class="purchase-form-panels">${combined?contactPanel()+addressPanel():contact?contactPanel():addressPanel()}</div><div class="form-actions">${contact?'':'<button class="button outline" type="button" data-action="edit-contact">Quay lại liên hệ</button>'}<button class="button primary" id="purchase-submit" type="submit" ${state.status==='checking'||state.needsPriceConfirm?'disabled':''}>${contact&&!combined?'Tiếp tục: địa chỉ':'Tiếp tục: kỳ cước & thanh toán'}</button></div><p class="demo-note">Thông tin chỉ lưu trong phiên xem bản mẫu. Không gửi đến FPT.</p></form>`;
+  }
+  function outsideCheckout(){
+    const st=state,methods=DemoPolicy.methods(plan(),state.period);
+    return `<div class="outside-contact-fields"><div class="outside-configuration"><span><strong>${esc(plan().name)} · ${period().label}</strong><small>${esc(plan().down)} · ${state.extras.length?state.extras.length+' thiết bị bổ sung':'Modem Wi-Fi 6 đi kèm'}</small></span><button class="text-button" type="button" data-edit-configuration>Sửa cấu hình</button></div><form id="purchase-form" novalidate><div class="purchase-form-panels">${contactPanel()}${addressPanel()}<section class="purchase-panel"><h2>Phương thức thanh toán</h2><div class="field"><label for="outside-method">Bạn muốn thanh toán bằng</label><select id="outside-method" name="method">${methods.map(m=>`<option value="${m.id}" ${state.method===m.id?'selected':''}>${esc(m.name)} · ${esc(m.description)}</option>`).join('')}</select></div><p class="outside-method-description">Chọn phương thức để chuyển sang cổng thanh toán sau khi địa chỉ và số tiền được xác nhận.</p></section></div><p class="demo-note">Thông tin chỉ dùng trong phiên prototype. Không gửi đăng ký hoặc thu tiền thật.</p></form></div>`;
+  }
+  async function outsidePay(){
+    if(outsideSubmitting||state.step!=='payment'||state.pricing)return;outsideSubmitting=true;
+    try{
+      if(!validate()||!validate(true))return;saveLead();const before=totals().total;
+      if(state.status==='checking')await new Promise(r=>setTimeout(r,550));
+      if(!validQuote()||state.needsPriceConfirm){if(!await checkAddress())return;}
+      if(totals().total!==before){state.policyMessage='Địa chỉ và ưu đãi đã được xác nhận. Vui lòng xem tổng tiền mới trước khi thanh toán.';render();return;}
+      pay();
+    }finally{outsideSubmitting=false;}
+  }
+  function payment(){
+    const t=totals();
+    return `<div class="payment-panels">${layout()==='one'?contactPanel()+addressPanel():''}<section class="purchase-panel" ${layout()==='one'?'hidden':''}><div class="panel-heading"><div><p class="eyebrow">THÔNG TIN ĐĂNG KÝ</p><h2>Kiểm tra trước khi thanh toán</h2></div><button class="text-button" type="button" data-action="edit-info">Sửa thông tin</button></div><dl class="customer-review"><div><dt>Người đăng ký</dt><dd>${esc(state.values.name)}</dd></div><div><dt>Điện thoại</dt><dd>${esc(state.values.phone)}</dd></div><div><dt>Địa chỉ lắp đặt</dt><dd>${esc(addressText())}</dd></div></dl></section><section class="purchase-panel"><div class="selected-package"><span><strong>${esc(plan().name)}</strong><small>${esc(plan().down)} · ${period().label}</small></span><button class="text-button" type="button" data-action="choose-plan">Đổi gói</button></div><p class="eyebrow">${layout()==='one'?'03':'01'} · KỲ THANH TOÁN</p><h2>Chọn kỳ cước phù hợp</h2><p class="panel-description">Giữ nguyên gói đã chọn. ${clean?'So sánh cước và phí lắp đặt theo kỳ. Thiết bị thêm và ưu đãi được tính trong tổng thanh toán.':'Mỗi kỳ hiển thị rõ khoản cần trả hôm nay.'}</p><fieldset class="period-options"><legend class="sr-only">Kỳ cước</legend>${D.periods.map(p=>`<label class="period-choice ${state.period===p.id?'selected':''}"><input type="radio" name="period" value="${p.id}" ${state.period===p.id?'checked':''}><span><strong>${p.label}</strong><small><span class="period-pay-label">${clean?'Cước & lắp đặt':'Trả hôm nay'}</span>${money((p.id==='post'?0:t.monthly*p.months)+p.fee)}</small><em>${p.id==='post'?'Phí lắp đặt':'Cước trả trước · phí lắp đặt 0đ'}</em></span></label>`).join('')}</fieldset><p class="period-description">${esc(period().description)}</p></section><section class="purchase-panel extras-panel"><button type="button" class="extras-toggle" aria-expanded="${state.extrasOpen?'true':'false'}" aria-controls="extras-content" data-action="toggle-extras"><span><strong>Dịch vụ / thiết bị bổ sung</strong><small>Không bắt buộc · ${state.extras.length?'đã chọn '+state.extras.length+' mục':'chỉ chọn khi bạn cần'}</small></span>${icon('down')}</button><div class="extras-content ${state.extrasOpen?'expanded':''}" id="extras-content" ${state.extrasOpen?'':'inert'}><div>${DemoPolicy.extras(plan(),state.period).map(x=>`<label class="extra-choice"><input type="checkbox" name="extra" value="${x.id}" ${state.extras.includes(x.id)?'checked':''}><span><strong>${esc(x.name)}</strong><small>${esc(x.description)}</small></span><strong>${money(x.price)}</strong></label>`).join('')}</div></div></section><section class="purchase-panel"><p class="eyebrow">${layout()==='one'?'04':'02'} · PHƯƠNG THỨC</p><h2>Thanh toán theo cách của bạn</h2><fieldset class="method-options"><legend class="sr-only">Phương thức thanh toán</legend>${DemoPolicy.methods(plan(),state.period).map(m=>`<label class="method-choice ${state.method===m.id?'selected':''}"><input type="radio" name="method" value="${m.id}" ${state.method===m.id?'checked':''}><span class="method-mark" aria-hidden="true">${m.mark}</span><span><strong>${m.name}</strong><small>${m.description}</small></span>${state.method===m.id?icon('check'):''}</label>`).join('')}</fieldset><p class="demo-note">Phương thức hiển thị theo chính sách mẫu của gói. Không thực hiện giao dịch thật.</p></section></div>`;
+  }
+  function steps(){
+    const full=state.step==='contact'?2:state.step==='address'?3:['payment','waiting','failed','pending'].includes(state.step)?4:5;
+    const complete=['paid','submitted'].includes(state.step),isPayment=['payment','waiting','failed','pending'].includes(state.step);
+    const n=clean?(complete?3:isPayment?2:1):!checkoutOnly?full:layout()==='one'?(complete?2:1):layout()==='two'?(complete?3:isPayment?2:1):full-1;
+    const labels=outside?['Tùy chỉnh gói','Thông tin & thanh toán']:clean?['Thông tin & địa chỉ','Kỳ cước & thanh toán']:!checkoutOnly?['Chọn gói','Liên hệ','Địa chỉ','Thanh toán','Hoàn tất']:layout()==='one'?['Thông tin & thanh toán']:layout()==='two'?['Thông tin đăng ký','Thanh toán']:['Liên hệ','Địa chỉ','Thanh toán'];
+    return `<ol class="purchase-steps" aria-label="Tiến trình đăng ký">${labels.map((x,i)=>`<li class="${i+1===n?'active':i+1<n?'done':''}" ${i+1===n?'aria-current="step"':''}><span>${i+1<n?icon('check'):i+1}</span><strong>${x}</strong></li>`).join('')}</ol>`;
+  }
+  function transactionView(){
+    const tx=state.transaction,pending=state.step==='pending',failed=state.step==='failed';
+    const title=pending?'Chưa xác định kết quả giao dịch':failed?'Thanh toán chưa thành công':'Đang chờ xác nhận thanh toán';
+    return `<section class="transaction-panel"><span class="transaction-icon ${failed?'failed':''}">${failed?'!':pending?'…':'<span class="spinner"></span>'}</span><h2 tabindex="-1">${title}</h2><p role="${failed?'alert':'status'}">${failed?'Đơn đăng ký, thông tin và ưu đãi vẫn được giữ. Bạn có thể thử lại, đổi phương thức hoặc nhờ người hỗ trợ.':pending?'Vui lòng kiểm tra trạng thái giao dịch trước khi thanh toán lại để tránh trả hai lần.':'Bản mẫu đang mô phỏng việc chuyển sang cổng thanh toán. Không có tiền được thu.'}</p><dl class="customer-review"><div><dt>Gói dịch vụ</dt><dd>${esc(tx.planName)}</dd></div><div><dt>Phương thức</dt><dd>${esc(tx.methodName)}</dd></div><div><dt>Số tiền</dt><dd>${money(tx.total)}</dd></div><div><dt>Mã đơn mẫu</dt><dd>${esc(state.order?.id||'')}</dd></div><div><dt>Mã tham chiếu mẫu</dt><dd>${esc(tx.id)}</dd></div></dl>${failed?'<div class="recovery-actions"><button class="button primary" data-action="retry-payment">Thử lại</button><button class="button outline" data-action="change-method">Đổi phương thức</button><button class="text-button contact-trigger">Nhờ sales hỗ trợ</button></div>':pending?'<button class="button outline" data-action="check-transaction">Kiểm tra giao dịch</button>':''}<div class="simulation-controls"><p class="eyebrow">ĐIỀU KHIỂN BẢN MẪU · KHÔNG THU TIỀN</p><div>${['waiting','pending'].includes(state.step)?'<button class="button outline" data-outcome="paid">Giả lập thành công</button><button class="button outline" data-outcome="failed">Giả lập thất bại</button>':''}${state.step==='waiting'?'<button class="button outline" data-outcome="pending">Chưa rõ kết quả</button><button class="text-button" data-outcome="cancel">Hủy và đổi phương thức</button>':''}</div></div></section>`;
+  }
+  function result(){
+    const tx=state.transaction;
+    return `<section class="purchase-result"><span class="result-check">${icon('check')}</span><p class="eyebrow">ĐĂNG KÝ GÓI DỊCH VỤ</p><h1 tabindex="-1">${state.step==='submitted'?'Đã gửi đăng ký · thanh toán sau':state.order.total===0?'Đăng ký thành công':'Thanh toán thành công'}</h1><p>Tiếp theo, FPT sẽ liên hệ xác nhận lịch lắp đặt.<br>Dịch vụ chưa được kích hoạt.</p><dl class="customer-review"><div><dt>Mã đơn mẫu</dt><dd>${esc(state.order.id)}</dd></div><div><dt>Mã giao dịch mẫu</dt><dd>${esc(tx.id)}</dd></div><div><dt>Gói dịch vụ</dt><dd>${esc(tx.planName)}</dd></div><div><dt>Người đăng ký</dt><dd>${esc(state.values.name)}</dd></div><div><dt>Địa chỉ</dt><dd>${esc(addressText())}</dd></div><div><dt>${state.step==='submitted'?'Chưa thanh toán':state.order.total===0?'Không cần thanh toán':'Đã thanh toán · mô phỏng'}</dt><dd>${money(tx.total)}</dd></div><div><dt>Người hỗ trợ</dt><dd>${esc(A.offer().sales.name)} · ${esc(A.offer().sales.id)}</dd></div></dl><div class="next-actions"><span>01 · Đã nhận đăng ký</span><span>02 · Xác nhận lịch lắp</span><span>03 · Triển khai dịch vụ</span></div><div class="result-actions"><button class="button outline" data-action="back-home">Về trang chọn gói</button><button class="text-button contact-trigger">Thông tin người hỗ trợ</button></div><p class="demo-note">Trạng thái mô phỏng. Không có đơn hàng hoặc giao dịch thật được tạo.</p></section>`;
+  }
+  function render(){
+    if(!state.planId||flow.hidden)return;flow.dataset.step=state.step;
+    const active=document.activeElement,id=active?.id,activeName=flow.contains(active)?active.name:null,activeValue=active?.value,action=flow.contains(active)?active.dataset?.action:null;
+    const selection=active?.tagName==='INPUT'&&['text','tel'].includes(active.type)?[active.selectionStart,active.selectionEnd]:null;
+    const mode=document.body.dataset.concept,titles={'1':'Đăng ký gọn. Thông tin rõ.','2':'Thiết lập kết nối của bạn.','3':'Kết nối mới cho nhà bạn.'},freeze=['waiting','pending'].includes(state.step);
+    flow.innerHTML=`<button type="button" class="text-button purchase-back" data-action="back-home" ${freeze?'disabled':''}>${icon('back')} ${checkoutOnly?'Đổi gói đã chọn':'Quay lại chọn gói'}</button>${['paid','submitted'].includes(state.step)?steps()+result():`<div class="purchase-heading"><p class="eyebrow">GÓI VÀ NGƯỜI HỖ TRỢ ĐÃ ĐƯỢC GIỮ SẴN</p><h1>${outside?(['payment','contact','address'].includes(state.step)?'Thông tin & thanh toán':'Hoàn tất đăng ký'):clean?(state.step==='contact'?'Thông tin & địa chỉ lắp đặt':state.step==='payment'?'Kỳ cước & thanh toán':'Hoàn tất đăng ký'):checkoutOnly?((layout()==='one'?'Đăng ký gọn trong một trang':layout()==='two'&&state.step==='contact'?'Thông tin đăng ký của bạn':null)||({contact:'Để FPT liên hệ với bạn',address:'Bạn muốn lắp đặt ở đâu?',payment:'Chọn cách thanh toán của bạn'}[state.step]||'Hoàn tất đăng ký')):titles[mode]}</h1><p>${state.step==='contact'?(clean?'Điền thông tin liên hệ, bổ sung địa chỉ. Giá được kiểm tra trước khi thanh toán.':'Để giữ đăng ký và kết nối bạn với người hỗ trợ.'):state.step==='address'?'Xác nhận địa chỉ trước khi chọn kỳ cước.':(outside?'Gói đã được giữ sẵn. Bổ sung liên hệ và địa chỉ chi tiết để hoàn tất đăng ký.':'Chọn kỳ cước và phương thức phù hợp với bạn.')}</p></div>${steps()}${state.policyMessage?'<p class="policy-message" role="status">'+esc(state.policyMessage)+'</p>':''}${state.pricing?'<p class="pricing-message" role="status">Đang cập nhật khoản thanh toán theo lựa chọn mới…</p>':''}<p class="data-status" role="status">${state.order?'Đăng ký mẫu '+esc(state.order.id)+' · chưa hoàn tất thanh toán':validQuote()&&!state.needsPriceConfirm?'Đã có địa chỉ · giá đã xác nhận':state.lead?'Thông tin liên hệ được giữ trong phiên mẫu':'Thông tin chỉ được sử dụng trong phiên prototype'}</p>${['contact','address','payment'].includes(state.step)?`<div class="purchase-layout">${state.step==='payment'?(outside?outsideCheckout():payment()):info()}${summary()}</div>`:transactionView()}`}${mobilePaymentBar()}`;
+    const restore=id&&document.getElementById(id)||activeName&&flow.querySelector(`[name="${CSS.escape(activeName)}"][value="${CSS.escape(String(activeValue))}"]`)||action&&flow.querySelector(`[data-action="${CSS.escape(action)}"]`);
+    if(restore){restore.focus({preventScroll:true});if(selection)try{restore.setSelectionRange(...selection);}catch{}}
+  }
+  function updateSummary(){
+    const node=flow.querySelector('.purchase-summary');if(node)node.outerHTML=summary();const bar=flow.querySelector('.checkout-mobile-action');if(bar)bar.outerHTML=mobilePaymentBar();
+    const feedback=flow.querySelector('#address-feedback');if(feedback)feedback.innerHTML=addressFeedback();
+  }
+  function invalidate(){state.epoch++;state.status='dirty';state.needsPriceConfirm=false;state.addressMessage='';state.quote=null;updateSummary();const check=flow.querySelector('.check-address');if(check){check.disabled=false;check.removeAttribute('aria-busy');check.textContent='Kiểm tra địa chỉ & giá';}const submit=flow.querySelector('#purchase-submit');if(submit)submit.disabled=false;}
+  function addressErrors(){
+    const v=state.values,errors={};
+    if(!D.regions[v.province])errors.province='Chọn tỉnh / thành phố trong danh sách.';
+    if(!D.regions[v.province]?.wards.includes(v.ward))errors.ward='Chọn phường / xã thuộc tỉnh / thành phố đã chọn.';
+    if(!['house','apartment'].includes(v.houseType))errors.houseType='Chọn loại địa điểm lắp đặt.';
+    if(v.houseType==='apartment'&&!D.buildings.includes(v.building))errors.building='Chọn chung cư lắp đặt.';
+    if(!String(v.address||'').trim())errors.address=v.houseType==='apartment'?'Nhập số căn hộ để kiểm tra lắp đặt.':'Nhập số nhà và tên đường để kiểm tra lắp đặt.';
+    return errors;
+  }
+  function validate(addressOnly=false){
+    const v=state.values,e=addressOnly?addressErrors():{};
+    if(!addressOnly){if(String(v.name||'').trim().length<2)e.name='Nhập họ tên từ 2 ký tự.';if(!/^0\d{9}$/.test(String(v.phone||'').replace(/\s/g,'')))e.phone='Nhập 10 chữ số, bắt đầu bằng 0.';if(!v.consent)e.consent='Vui lòng đồng ý chính sách để tiếp tục.';}
+    state.errors=e;
+    if(Object.keys(e).length){render();flow.querySelector('[aria-invalid="true"]')?.focus();return false;}
+    return true;
+  }
+  function saveLead(){
+    const v=state.values;if(String(v.name||'').trim().length<2||!v.consent||!/^0\d{9}$/.test(String(v.phone||'').replace(/\s/g,'')))return;
+    state.lead={campaignId:window.campaign.id,id:state.lead?.id||'LEAD-MAU-'+Date.now(),salesId:A.offer().sales.id,planId:state.planId,province:v.province,name:v.name,phone:v.phone,status:'draft'};
+    const status=flow.querySelector('.data-status');if(status)status.textContent='Lead nháp đã được ghi nhận · mẫu';
+  }
+  function move(step){state.step=step;state.errors={};render();scrollTo({top:0,behavior:'instant'});flow.querySelector('h1')?.setAttribute('tabindex','-1');flow.querySelector('h1')?.focus({preventScroll:true});}
+  function createOrder(){if(!state.order)state.order={campaignId:window.campaign.id,id:'DON-MAU-'+Date.now(),salesId:A.offer().sales.id};Object.assign(state.order,{status:standard?'configured':'awaiting_payment',period:state.period,extras:[...state.extras],method:state.method,voucherCode:state.voucher?.code||null,leadId:state.lead?.id,planId:state.planId,values:{...state.values},total:totals().total});}
+  function choosePlan(){A.setRegion({...state.values});if(checkoutOnly||clean){const d=document.getElementById('details-dialog');d.innerHTML=`<div class="modal-header"><h2>Chọn gói khác</h2><button class="icon-button" data-close aria-label="Đóng chọn gói">${icon('close')}</button></div><p class="muted">Thông tin liên hệ và khu vực của bạn được giữ.</p><div class="replacement-plans">${A.groups().flatMap(g=>g.plans).map(p=>`<button class="replacement-plan" data-register="${esc(p.id)}"><strong>${esc(p.name)}</strong><span>${money(A.price(p,state.values.province))}/tháng</span></button>`).join('')}</div>`;d.showModal();return;}A.home();A.renderHome();document.getElementById('plans')?.scrollIntoView();}
+
+  async function checkAddress(){
+    if(!validate(true))return false;
+    if(validQuote())return !state.needsPriceConfirm;
+    if(state.status==='checking')return false;
+    const token=++state.epoch,sig=signature(),scenario=state.scenario,p=plan();
+    state.status='checking';render();
+    await new Promise(resolve=>setTimeout(resolve,500));
+    if(token!==state.epoch||sig!==signature())return false;
+    if(scenario==='error'){state.status='error';state.addressMessage='Kết nối mô phỏng bị gián đoạn. Chọn “Kiểm tra địa chỉ & giá” để thử lại.';render();return false;}
+    if(scenario==='unavailable'||scenario==='none'){
+      const alternatives=scenario==='none'?[]:A.groups().flatMap(g=>g.plans).filter(x=>x.id!==p.id);
+      state.status=alternatives.length?'unavailable':'none';state.quote={signature:sig,alternatives};state.voucher=null;state.voucherMessage='';render();return false;
+    }
+    const delta=scenario==='same'?0:scenario==='price'?30000:D.regions[state.values.province].delta;
+        const monthly=scenario==='same'?(state.lastAcceptedMonthly??p.price):p.price+delta;
+    if(state.lastAcceptedMonthly===null)state.lastAcceptedMonthly=A.price(p,A.offer().address?.province||state.values.province);
+    state.quote={signature:sig,monthly,alternatives:[]};state.status='verified';state.needsPriceConfirm=monthly!==state.lastAcceptedMonthly;
+    refreshPolicy();render();
+    if(state.needsPriceConfirm){flow.querySelector('[data-action="confirm-price"]')?.focus();return false;}
+    return true;
+  }
+  async function submit(){
+    if(state.step==='contact'){if(!validate())return;saveLead();if(layout()!=='two'){move('address');flow.querySelector('#buy-address')?.focus();return;}if(!validate(true))return;if(state.status==='checking')await new Promise(resolve=>setTimeout(resolve,550));if(await checkAddress()){if(standard)createOrder();move('payment');}return;}
+    if(state.step!=='address'||!validate(true))return;
+    if(state.status==='checking'){await new Promise(resolve=>setTimeout(resolve,550));if(state.step!=='address')return;}
+    if(!await checkAddress())return;
+    saveLead();if(standard)createOrder();move('payment');
+  }
+  function applyVoucher(code){
+    if(!validQuote()){state.voucherMessage='Kiểm tra lại địa chỉ trước khi áp dụng ưu đãi.';state.voucherError=true;render();return;}
+    const normalized=String(code).trim().toUpperCase(),v=D.vouchers.find(x=>x.code===normalized||x.aliases?.includes(normalized)),reason=voucherReason(v);
+    if(reason){state.voucherMessage=reason;state.voucherError=true;render();return;}
+    state.voucher={...v,code:normalized};state.voucherManual=true;state.voucherCode=normalized;state.voucherMessage='Áp dụng thành công';state.voucherError=false;render();
+  }
+  function openVouchers(){
+    if(!validQuote())return;
+    chosenVoucher=state.voucher?.code||'';
+    voucherDialog.innerHTML=`<div class="modal-header"><div><p class="eyebrow">ƯU ĐÃI CHO ĐƠN CỦA BẠN</p><h2>Chọn voucher</h2></div><button class="icon-button" data-close aria-label="Đóng chọn voucher">${icon('close')}</button></div><p class="muted">Chọn một ưu đãi phù hợp với kỳ cước hiện tại.</p><fieldset class="voucher-list"><legend class="sr-only">Danh sách voucher</legend>${D.vouchers.map(v=>{const reason=voucherReason(v);return `<label class="voucher-option ${reason?'ineligible':''}"><input type="radio" name="voucher-choice" value="${v.code}" ${chosenVoucher===v.code||v.aliases?.includes(chosenVoucher)?'checked':''} ${reason?'disabled':''}><span class="voucher-art" aria-hidden="true">${icon('ticket')}</span><span><strong>${v.title}</strong><small>${v.code}</small><p>${esc(v.description)}</p>${reason?`<em>${esc(reason)}</em>`:''}</span></label>`;}).join('')}</fieldset><p class="demo-note">Điều kiện và số tiền giảm là dữ liệu mẫu, chưa phải chính sách FPT.</p><div class="modal-footer"><button type="button" class="button outline" data-close>Hủy</button><button type="button" class="button primary" id="voucher-confirm" ${chosenVoucher&&!voucherReason(state.voucher)?'':'disabled'}>Áp dụng ưu đãi</button></div>`;
+    voucherDialog.showModal();
+  }
+  function pay(){
+    if(state.pricing)return;if(!DemoPolicy.methods(plan(),state.period).some(m=>m.id===state.method))return;
+    if(!validQuote()||state.needsPriceConfirm){move(layout()==='one'?'payment':layout()==='two'?'contact':'address');return;}
+    if(!validate()||!validate(true))return;
+    if(state.transaction&&['waiting','pending','paid'].includes(state.transaction.status))return;
+    refreshPolicy();const p=plan(),t=totals();
+    createOrder();state.order.status='awaiting_payment';
+    state.transaction={id:'AM-MAU-'+String(Date.now()).slice(-6),planId:p.id,planName:p.name,method:state.method,methodName:D.methods.find(x=>x.id===state.method).name,total:t.total,status:'waiting'};
+    if(t.total===0){state.transaction.status='paid';state.order.status='confirmed_zero';state.step='paid';render();scrollTo({top:0,behavior:'instant'});return;}state.step='waiting';render();scrollTo({top:0,behavior:'instant'});flow.querySelector('h2')?.focus();
+  }
+  function outcome(value){
+    if(!state.transaction||!['waiting','pending'].includes(state.step))return;
+    clearTimeout(timer);
+    if(value==='paid'){state.transaction.status='paid';state.order.status='paid';state.step='paid';render();scrollTo({top:0,behavior:'instant'});flow.querySelector('h1')?.focus();}
+    if(value==='failed'){state.order.status='payment_failed';state.transaction.status='failed';state.step='failed';render();flow.querySelector('h2')?.focus();}
+    if(value==='pending'){state.order.status='payment_pending';state.transaction.status='pending';state.step='pending';render();flow.querySelector('h2')?.focus();}
+    if(value==='cancel'&&state.step==='waiting'){state.transaction.status='canceled';state.step='failed';render();}
+  }
+  function open(id){
+    if(['waiting','pending'].includes(state.step)){flow.hidden=false;document.getElementById('home').hidden=true;render();return;}
+    if(!window.catalog.some(p=>p.id===id))return;
+    const prior=state.planId;if(prior&&prior!==id){const lostExtra=state.extras.some(x=>!DemoPolicy.extras(window.catalog.find(p=>p.id===id),state.period).some(e=>e.id===x));if((lostExtra||state.voucher)&&!window.confirm('Đổi gói sẽ kiểm tra lại thiết bị và ưu đãi; một số lựa chọn có thể bị gỡ. Tiếp tục?'))return;}if(!prior)state.period=window.landingState.period;
+    if(!prior)state.values={...A.offer().address,address:'',block:'',name:'',phone:'',note:'',consent:false};
+    if(['paid','submitted'].includes(state.step)){const scenario=state.scenario;Object.assign(state,initial(),{scenario});state.values={...A.offer().address,address:'',block:'',name:'',phone:'',note:'',consent:false};}
+    state.planId=id;state.step=layout()==='one'?'payment':layout()==='two'?'contact':state.lead?'address':'contact';state.errors={};if(state.lead)state.lead.planId=id;
+    if(prior!==id||!state.quote){if(!standard)state.order=null;state.lastAcceptedMonthly=null;invalidate();if(state.voucher){state.voucherMessage='Ưu đãi sẽ được kiểm tra lại cho gói mới.';state.voucherError=false;}}
+    refreshPolicy();flow.hidden=false;document.getElementById('home').hidden=true;document.body.classList.add('purchasing');render();scrollTo({top:0,behavior:'instant'});flow.querySelector(state.step==='contact'?'#buy-name':'#buy-address')?.focus({preventScroll:true});
+  }
+  function reset(){state.epoch++;clearTimeout(timer);const epoch=state.epoch;Object.assign(state,initial(),{epoch});flow.innerHTML='';}
+  function close(){if(['waiting','pending'].includes(state.step)||state.pricing)return false;state.epoch++;if(state.status==='checking')state.status='dirty';return true;}
+  function setScenario(scenario){
+    if(['waiting','pending','paid'].includes(state.step)){document.getElementById('scenario-preview').value=state.scenario;return;}
+    state.scenario=scenario;if(state.planId){invalidate();if(state.step==='payment'&&!outside)state.step=layout()==='two'?'contact':'address';render();}
+  }
+  async function preview(screen){
+    if(['waiting','pending'].includes(state.step)){flow.hidden=false;document.getElementById('home').hidden=true;render();return;}
+    const first=A.groups().flatMap(g=>g.plans)[0];if(!first){A.home();return;}if(!A.offer().address?.province){A.regionPicker(first.id);return;}
+    open(state.planId||first.id);
+    if(screen==='payment'){
+      Object.assign(state.values,{name:state.values.name||'Khách mẫu',phone:state.values.phone||'0900000000',address:state.values.address||(state.values.houseType==='apartment'?'A1205':'123 Đường mẫu'),consent:true});
+      saveLead();if(await checkAddress()){if(standard)createOrder();state.step='payment';render();scrollTo({top:0,behavior:'instant'});}
+    }
+  }
+  flow.addEventListener('submit',e=>{e.preventDefault();if(outside&&state.step==='payment'){outsidePay();return;}if(['contact','address'].includes(state.step))submit();});
+  flow.addEventListener('input',e=>{
+    const el=e.target,name=el.name;
+    if(el.id==='voucher-code'){state.voucherCode=el.value;flow.querySelector('#apply-voucher').disabled=!validQuote()||!el.value.trim();return;}
+    if(!name||['period','extra','method','houseType'].includes(name))return;
+    state.values[name]=el.type==='checkbox'?el.checked:el.value;delete state.errors[name];el.removeAttribute('aria-invalid');const error=flow.querySelector('#buy-'+name+'-error');if(error)error.textContent='';
+    if(['province','ward','houseType','building','address','block'].includes(name))invalidate();
+    if(!standard&&['name','phone','consent'].includes(name))saveLead();
+  });
+  flow.addEventListener('focusout',e=>{if((state.step==='address'||layout()==='two'&&state.step==='contact'||(outside||layout()==='one')&&state.step==='payment')&&['address','block'].includes(e.target.name))setTimeout(()=>{if((state.step==='address'||layout()==='two'&&state.step==='contact'||(outside||layout()==='one')&&state.step==='payment')&&!Object.keys(addressErrors()).length)checkAddress();},0);});
+  flow.addEventListener('toggle',e=>{if(e.target.isConnected&&e.target.matches('.voucher-disclosure'))state.voucherOpen=e.target.open;},true);
+  flow.addEventListener('change',e=>{
+    const el=e.target,name=el.name;
+    if(name==='province'){state.values.province=el.value;state.values.ward=D.regions[el.value]?.wards[0]||'';state.values.building='';invalidate();render();}
+    else if(name==='ward'||name==='building'){state.values[name]=el.value;invalidate();render();}
+    else if(name==='houseType'){state.values.houseType=el.value;state.values.address='';state.values.block='';state.values.building='';invalidate();render();}
+    else if(name==='period'){recalculate(()=>{state.period=el.value;state.voucherManual=false;});}
+    else if(name==='extra'){const checked=el.checked,value=el.value;recalculate(()=>{state.extras=checked?[...new Set([...state.extras,value])]:state.extras.filter(x=>x!==value);});}
+    else if(name==='method'){recalculate(()=>{state.method=el.value;});}
+  });
+  flow.addEventListener('click',e=>{
+    const button=e.target.closest('button');if(!button)return;if(button.hasAttribute('data-mobile-pay')){if(outside)outsidePay();else pay();return;}
+    if(button.dataset.replace){state.planId=button.dataset.replace;if(state.lead)state.lead.planId=state.planId;state.order=null;state.lastAcceptedMonthly=null;state.scenario='normal';document.getElementById('scenario-preview').value='normal';invalidate();checkAddress();return;}
+    if(button.dataset.outcome){outcome(button.dataset.outcome);return;}
+    switch(button.dataset.action){
+      case 'back-home':if(checkoutOnly)choosePlan();else{window.landingState.period=state.period;A.setRegion({...state.values});A.renderHome();A.home();}break;
+      case 'edit-address':state.addressEditing=!state.addressEditing;render();if(state.addressEditing)flow.querySelector('#buy-province')?.focus();break;
+      case 'check-address':checkAddress();break;
+      case 'confirm-price':state.lastAcceptedMonthly=state.quote.monthly;state.needsPriceConfirm=false;render();break;
+            case 'edit-info':if(layout()==='one')flow.querySelector('#buy-name')?.focus();else move(layout()==='two'?'contact':'address');break;
+      case 'edit-contact':move('contact');break;
+      case 'choose-plan':choosePlan();break;
+      case 'change-method':move('payment');flow.querySelector('[name=method]')?.focus();break;
+      case 'pay-later':if(state.step!=='failed'||!state.order)return;state.order.status='submitted_unpaid';move('submitted');break;
+      case 'toggle-extras':state.extrasOpen=!state.extrasOpen;render();break;
+      case 'open-vouchers':openVouchers();break;
+      case 'apply-code':applyVoucher(state.voucherCode);break;
+      case 'remove-voucher':state.voucherManual=true;state.voucher=null;state.voucherCode='';state.voucherMessage='Đã bỏ ưu đãi.';state.voucherError=false;render();break;
+      case 'pay':if(outside)outsidePay();else pay();break;
+      case 'retry-payment':state.step='payment';render();break;
+      case 'check-transaction':button.disabled=true;button.textContent='Đang kiểm tra…';timer=setTimeout(()=>{if(state.step==='pending'){render();const p=flow.querySelector('.transaction-panel [role="status"]');p.textContent='Giao dịch vẫn chưa có kết quả. Chưa tạo giao dịch mới; tiếp tục kiểm tra hoặc liên hệ người hỗ trợ.';}},500);break;
+    }
+  });
+  voucherDialog.addEventListener('change',e=>{if(e.target.name==='voucher-choice'){chosenVoucher=e.target.value;document.getElementById('voucher-confirm').disabled=false;}});
+  voucherDialog.addEventListener('click',e=>{if(e.target.closest('#voucher-confirm')){applyVoucher(chosenVoucher);voucherDialog.close();flow.querySelector('[data-action="open-vouchers"]')?.focus({preventScroll:true});}});
+  function setLayout(value){if(!checkoutOnly||!['one','two','three'].includes(value)||['waiting','pending'].includes(state.step))return false;document.body.dataset.checkoutLayout=value;if(!['paid','submitted'].includes(state.step))state.step=value==='one'?'payment':'contact';state.errors={};render();return true;}
+  window.Purchase={setLandingPeriod:value=>{state.period=value;state.voucherManual=false;refreshPolicy();},setLayout,state,open,close,reset,render,preview,setScenario,totals,checkAddress,validQuote};
+})();

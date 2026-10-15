@@ -1,0 +1,13 @@
+PASS 1440px: landing, periods, state transfer, repricing lock, voucher compatibility, address confirmation, retry/pending/success
+PASS 768px: landing, periods, state transfer, repricing lock, voucher compatibility, address confirmation, retry/pending/success
+PASS 375px: landing, periods, state transfer, repricing lock, voucher compatibility, address confirmation, retry/pending/success
+PASS cancel preserves choices; confirm removes incompatible device and warns
+PASS logo navigation preserves latest period
+PASS landing region retained in checkout
+PASS address scenario error
+PASS address scenario unavailable
+PASS address scenario none
+PASS address scenario price
+PASS zero-total completion without gateway
+PASS FAQ and consultation validation, consent, campaign attribution, duplicate prevention
+PASS no page errors
