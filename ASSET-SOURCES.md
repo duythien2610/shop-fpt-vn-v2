@@ -14,3 +14,8 @@ Ngày thu thập: 13/10/2026. Ảnh dưới đây dùng cho prototype review n�
 Nguồn tham khảo cấu trúc/nội dung: https://ftel-am.vercel.app/index.html, https://ftel-am.vercel.app/tuy-chinh-goi.html, https://www.xfinity.com/learn/internet-service, https://fpt.vn/ngoai-hang-anh/.
 
 Không lấy giá/ưu đãi của trang FPT công khai làm bảng giá AM. Các con số trên prototype là fixture được ghi rõ trong BA-SPEC.
+
+## Landing promotional artwork
+- `assets/promo-advisor.png`: generated with built-in ImageGen for the AM landing prototype. Fictional advisor; no real employee identity.
+- Prompt: Friendly adult Vietnamese female advisor in orange polo holding a smartphone, small orange ribbon gift box, warm orange campaign background, restrained gold coin accents; portrait 4:5, no text, logos or speech bubbles. Promotional text and interactive bubble are HTML.
+- Offer copy uses prototype policy data, not approved production pricing.

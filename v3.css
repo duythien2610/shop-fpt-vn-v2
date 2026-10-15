@@ -92,3 +92,45 @@ body[data-clean="true"] .purchase{padding-top:24px}
  .selected-package{align-items:start;padding:12px}.selected-package strong{font-size:13px}
 }
 body[data-clean="true"] .header-inner{display:flex;justify-content:space-between;align-items:center}
+/* Landing review: compact campaign, clear prices and visible advisor. */
+body[data-clean="true"] .header .header-consult{display:flex;flex-direction:column;align-items:flex-start;gap:3px;border-radius:10px;padding:10px 18px;line-height:1.35}
+.header-consult .advisor-label{font-size:11px;font-weight:400}.header-consult>span:last-child{display:flex;align-items:center;gap:8px}
+.campaign-hero{display:grid;grid-template-columns:1.35fr 1fr;background:#fff}
+.campaign-hero>img{width:100%;height:auto;aspect-ratio:1200/628;align-self:center}
+.campaign-hero-bar{flex-direction:column;align-items:flex-start;justify-content:center;padding:28px;gap:20px}
+.campaign-hero-bar strong{font-size:26px;line-height:1.25}.campaign-hero-bar span{font-size:14px;line-height:1.7;margin-top:12px}
+.x-section-title h1{font-size:36px}.x-section-title>div{max-width:760px}
+.x-plan .x-description{margin-top:14px;min-height:44px;font-size:14px;color:var(--foreground)}
+.x-plan .plan-price-top{margin-top:20px}.x-plan .x-price-note{margin-bottom:12px;line-height:1.65}
+.x-plan .x-speed{font-size:22px;margin-top:8px;letter-spacing:-.02em}.x-plan .x-speed>span{display:inline;margin-left:8px;font-size:11px}
+.x-plan ul{margin:20px 0}.x-plan-bottom{padding-top:16px}
+.landing-benefits{padding-block:40px 56px;display:grid;grid-template-columns:1fr 1fr;gap:64px;border-top:1px solid var(--border);scroll-margin-top:100px}
+.benefits-heading h2{font-size:30px;line-height:1.3;letter-spacing:-.03em;margin:12px 0 16px}.benefits-heading>p:not(.eyebrow){font-size:14px;color:var(--muted);line-height:1.8;max-width:420px}.benefits-heading .text-button{color:var(--primary);margin-top:16px}
+.benefits-list{display:grid;gap:20px}.benefits-list article{padding-bottom:20px;border-bottom:1px solid var(--border)}.benefits-list h3{font-size:16px;margin-bottom:8px}.benefits-list p{font-size:14px;line-height:1.8;color:var(--muted)}
+#faq,#consult{scroll-margin-top:100px}
+body[data-clean="true"] .landing-footer{display:grid;grid-template-columns:1.2fr 1fr 1fr;align-items:start;gap:32px;padding-block:32px}
+.landing-footer>div{display:flex;flex-direction:column;align-items:flex-start;gap:12px}.landing-footer strong{font-size:14px}.landing-footer p,.landing-footer a,.landing-footer .text-button{font-size:12px;line-height:1.8}.landing-footer .text-button{padding:0;text-align:left;min-height:44px}
+@media(max-width:1000px){body[data-clean="true"] .header nav{gap:16px;margin-left:20px}.campaign-hero-bar strong{font-size:22px}.landing-benefits{gap:32px}}
+@media(max-width:767px){
+ body[data-clean="true"] .header .header-consult{margin-left:auto;padding:8px 12px;min-height:48px;font-size:12px}.header-consult .advisor-label{font-size:10px}
+ .campaign-hero{grid-template-columns:1fr}.campaign-hero-bar{padding:20px;gap:16px}.campaign-hero-bar strong{font-size:22px}.campaign-hero-bar span{font-size:13px;margin-top:8px}.campaign-hero-bar .button{width:100%}
+ .x-section-title h1{font-size:28px}.x-plan .x-description{min-height:0}.x-plan .x-speed{font-size:22px}.x-plan .x-speed>span{font-size:11px}
+ .landing-benefits{grid-template-columns:1fr;gap:28px;padding-block:32px}.benefits-heading h2{font-size:26px}.benefits-heading>p:not(.eyebrow),.benefits-list p{font-size:13px}
+ body[data-clean="true"] .landing-footer{grid-template-columns:1fr;gap:28px}.landing-footer>div{gap:8px}
+}
+/* Wide campaign and separate promotional offers. */
+.campaign-hero{display:block}.campaign-hero>img{width:100%;height:auto;aspect-ratio:1200/628;object-fit:contain}
+.campaign-hero-bar{flex-direction:row;align-items:center;justify-content:space-between;padding:20px 28px}.campaign-hero-bar strong{font-size:18px}.campaign-hero-bar span{margin-top:6px;font-size:13px}
+.promo-section{margin-block:16px 56px;background:linear-gradient(115deg,#b94300,#e65b00 65%,#ffad28);color:white;scroll-margin-top:96px;overflow:hidden}
+.promo-layout{display:grid;grid-template-columns:1.45fr 1fr;gap:36px;align-items:center}.promo-copy{padding-block:44px;position:relative;z-index:1}.promo-copy .eyebrow{color:#fff3df}.promo-copy h2{font-size:36px;letter-spacing:-.035em;margin:12px 0}.promo-intro{font-size:16px;line-height:1.6;color:#fff3df}
+.promo-rows{background:#fffaf3;color:var(--foreground);border-radius:16px;padding:4px 24px;margin-top:24px}.promo-rows article{display:flex;align-items:center;gap:18px;padding:20px 0}.promo-rows article+article{border-top:1px solid #e7d8c8}.promo-number{display:grid;place-items:center;width:42px;height:42px;flex-shrink:0;background:#ffebd4;color:#a43b00;border-radius:50%;font-weight:700}.promo-rows h3{font-size:18px;line-height:1.4;margin-bottom:6px}.promo-rows p{font-size:14px;line-height:1.7;color:#555c64}.promo-shared{font-size:13px;line-height:1.8;margin-top:20px;font-weight:600}.promo-note{font-size:11px;line-height:1.8;margin-top:10px;max-width:600px;color:#fff3df}
+.promo-art{position:relative;align-self:stretch;min-width:0;display:flex;align-items:center}.promo-art img{width:100%;height:auto;display:block;border-radius:20px;max-height:580px;object-fit:cover}.promo-bubble{position:absolute;right:12px;top:24px;padding:16px 20px;background:white;color:#192530;font-size:16px;line-height:1.5;font-weight:600;border-radius:20px 20px 4px 20px;box-shadow:0 6px 24px #74300022}.promo-bubble:hover{background:#fff3df}.promo-bubble span{margin-left:8px;color:#a43b00}
+@media(max-width:1000px){.promo-layout{gap:24px;grid-template-columns:1.25fr 1fr}.promo-copy h2{font-size:30px}.promo-rows{padding-inline:18px}.promo-rows h3{font-size:16px}.promo-bubble{right:8px;top:20px;font-size:13px;padding:12px}}
+@media(max-width:767px){.campaign-hero-bar{flex-direction:column;align-items:stretch;padding:20px;gap:16px}.campaign-hero-bar .button{width:100%}.promo-section{margin-block:8px 32px}.promo-layout{grid-template-columns:1fr;gap:0}.promo-copy{padding-block:28px 20px}.promo-copy h2{font-size:28px}.promo-intro{font-size:14px}.promo-rows{padding-inline:16px;margin-top:20px}.promo-rows article{gap:12px;padding:16px 0}.promo-rows p{font-size:13px}.promo-number{width:36px;height:36px;font-size:13px}.promo-art{max-width:360px;width:100%;justify-self:center;margin-bottom:24px}.promo-art img{max-height:350px;object-position:50% 25%}.promo-bubble{top:16px;right:12px;font-size:14px}.promo-shared{font-size:12px}.epl-section>h2{font-size:27px}}
+body[data-clean="true"] .promo-copy .eyebrow{color:#fff3df}
+/* Service and payment choices remain independent. */
+.landing-payment{display:flex;align-items:center;gap:12px;font-size:13px;flex-shrink:0}.landing-payment label{color:var(--muted)}.landing-payment select{appearance:none;background:var(--surface);border:1px solid var(--border-strong);border-radius:8px;color:var(--foreground);padding:12px 38px 12px 14px;min-height:46px;font:inherit;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%235c6874' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;cursor:pointer}
+.payment-benefit{padding:12px 16px;border-radius:8px;background:#fff0df;color:#943600;font-size:14px;font-weight:600;margin-top:16px;line-height:1.6}.card-benefit{color:#943600;background:#fff0df;border-radius:6px;font-size:12px;font-weight:600;line-height:1.65;padding:10px 12px;margin-bottom:16px}.sample-plan{font-size:10px;font-weight:400;color:var(--muted);display:block;width:100%;line-height:1.6}.x-plan-bottom .plan-upfront{padding-bottom:24px}.x-plan-bottom>.button{margin-top:8px;min-height:48px}.x-plan-title h3{line-height:1.5}
+@media(max-width:767px){.landing-payment{justify-content:space-between;margin-top:16px}.landing-payment select{min-width:190px}.plan-toolbar .x-tabs{border-radius:10px}.plan-toolbar .x-tabs button{font-size:11px;padding:10px 8px}.payment-benefit{font-size:13px}.plan-upfront small{font-size:11px}}
+/* Payment comparison is shown only for prepaid periods. */
+.plan-upfront[hidden],.card-benefit[hidden],.payment-benefit[hidden],.period-help[hidden]{display:none!important}

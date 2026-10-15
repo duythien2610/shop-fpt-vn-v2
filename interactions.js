@@ -4,13 +4,14 @@
  const showHome=()=>{if(!Purchase.close())return false;Storefront.home();return true;};
  root.addEventListener('click',e=>{
   const b=e.target.closest('button,a');if(!b)return;
+  if(b.matches('[data-show-internet]')){if(!showHome())return;Storefront.setHomeCategory('internet');document.getElementById('plans').scrollIntoView({behavior:'smooth'});}
   if(b.matches('[data-show-combo]')){if(!showHome())return;Storefront.setHomeCategory('combo');document.getElementById('plans').scrollIntoView({behavior:'smooth'});}
-  if(b.matches('[data-consult],.header-consult')){e.preventDefault();if(!showHome())return;Storefront.renderHome();document.getElementById('consult').scrollIntoView({behavior:'smooth'});}
+  if(b.matches('[data-consult]')){e.preventDefault();if(!showHome())return;Storefront.renderHome();document.getElementById('consult').scrollIntoView({behavior:'smooth'});}
  });
  root.addEventListener('change',e=>{
   if(e.target.name==='landing-period'){
    s.period=e.target.value;Purchase.setLandingPeriod(s.period);Storefront.renderHome();
-   document.querySelector(`[name="landing-period"][value="${s.period}"]`)?.focus({preventScroll:true});
+   document.getElementById("landing-period")?.focus({preventScroll:true});
   }
  });
  root.addEventListener('input',e=>{
